@@ -39,7 +39,7 @@ public class TTPService {
 	LinkedList<Datagram> sentList = new LinkedList<Datagram>();
 	HashMap<Integer, Datagram> map = new HashMap<Integer, Datagram>();
 	HashMap<Integer, Integer> timeMap = new HashMap<Integer, Integer>();
-	
+
 	Thread sendThread;
 	Thread receiveThread;
 
@@ -48,8 +48,9 @@ public class TTPService {
 	 */
 	LinkedList<Datagram> receivedList = new LinkedList<Datagram>();
 
-	public TTPService(short port, int windowSize, int timeout) throws SocketException {
-		datagramService = new DatagramService(port,0);
+	public TTPService(short port, int windowSize, int timeout)
+			throws SocketException {
+		datagramService = new DatagramService(port, 0);
 		this.windowSize = windowSize;
 		this.timeout = timeout;
 	}
@@ -66,18 +67,20 @@ public class TTPService {
 	 *             gram should be resent timeThread is for monitoring if any
 	 *             sent but not yes acked gram is timeout. If so, it resent the
 	 *             gram immediately
+	 *             
+	 *             use a String as the lock among threads to synchronize currentSize
 	 */
 	public void send(Object data) throws IOException {
 
 		// here do some segmentation
 		partition(data);
 
-		sendThread = new Thread(new sendThread());
-		receiveThread = new Thread(new receiveThread());
-		
+		sendThread = new Thread(new sendThread("lock"));
+		receiveThread = new Thread(new receiveThread("lock"));
+
 		sendThread.start();
 		receiveThread.start();
-		
+
 		try {
 			sendThread.join();
 			receiveThread.join();
@@ -98,6 +101,13 @@ public class TTPService {
 	 * 
 	 */
 	private class sendThread implements Runnable {
+
+		private String lock;
+
+		public sendThread(String lock) {
+			this.lock = lock;
+		}
+
 		public void run() {
 			try {
 				while (!readyList.isEmpty()) {
@@ -105,16 +115,20 @@ public class TTPService {
 						Datagram gram = readyList.removeFirst();
 						datagramService.sendDatagram(gram);
 						sentList.add(gram);
-						currentSize++;
 
+						synchronized (lock) {
+							currentSize++;
+						}
+						
 						int ack = gram.getSeq() + gram.getSize();
 						map.put(ack, gram);
 
 						Date date = new Date();
 						timeMap.put(ack, (int) date.getTime());
-						
+
 						if (verbose > 0) {
-							System.out.println("sent datagram, sequenceNum: " + String.valueOf(gram.getSeq()));
+							System.out.println("sent datagram, sequenceNum: "
+									+ String.valueOf(gram.getSeq()));
 						}
 					}
 				}
@@ -138,10 +152,17 @@ public class TTPService {
 	 * 
 	 */
 	private class receiveThread implements Runnable {
+
+		private String lock;
+
+		public receiveThread(String lock) {
+			this.lock = lock;
+		}
+
 		public void run() {
 			try {
 				runTimer();
-				
+
 				while (true) {
 					Datagram gram = datagramService.receiveDatagram();
 
@@ -152,10 +173,14 @@ public class TTPService {
 						map.remove(gram.getAck());
 						timeMap.remove(waitingAck);
 
-						currentSize--;
-						
+						synchronized (lock) {
+							currentSize--;
+						}
+
 						if (verbose > 0) {
-							System.out.println("received datagram, sequenceNum: " + String.valueOf(gram.getSeq()));
+							System.out
+									.println("received datagram, sequenceNum: "
+											+ String.valueOf(gram.getSeq()));
 						}
 
 						if (gram.getFrag() == false)
@@ -164,13 +189,17 @@ public class TTPService {
 
 					else if (gram.getAck() < waitingAck) {
 						if (verbose > 0) {
-							System.out.println("received duplicate datagram, sequenceNum: " + String.valueOf(gram.getSeq()));
+							System.out
+									.println("received duplicate datagram, sequenceNum: "
+											+ String.valueOf(gram.getSeq()));
 						}
 					}
-					
+
 					else {
 						if (verbose > 0) {
-							System.out.println("received unexpected datagram, sequenceNum: " + String.valueOf(gram.getSeq()));
+							System.out
+									.println("received unexpected datagram, sequenceNum: "
+											+ String.valueOf(gram.getSeq()));
 						}
 						for (int i = 0; i < sentList.size(); i++) {
 							datagramService.sendDatagram(sentList.get(i));
@@ -191,8 +220,8 @@ public class TTPService {
 	}
 
 	/**
-	 * runTimer starts a Timer to check if the sent but not yet acked grams are timeout.
-	 * If so, just resend it immediately.
+	 * runTimer starts a Timer to check if the sent but not yet acked grams are
+	 * timeout. If so, just resend it immediately.
 	 * 
 	 * @author Hao
 	 * 
@@ -209,7 +238,10 @@ public class TTPService {
 						if (date.getTime() > time + timeout) {
 							datagramService.sendDatagram(map.get(ack));
 							if (verbose > 0) {
-								System.out.println("timeout, resending datagram, sequenceNum: " + String.valueOf(map.get(ack).getSeq()));
+								System.out
+										.println("timeout, resending datagram, sequenceNum: "
+												+ String.valueOf(map.get(ack)
+														.getSeq()));
 							}
 							timeMap.put(ack, (int) date.getTime());
 						}
@@ -239,7 +271,7 @@ public class TTPService {
 			newGram.setDstport(desPort);
 			newGram.setSrcaddr(srcIP);
 			newGram.setSrcport(srcPort);
-			
+
 			newGram.setChecksum((short) 0);
 
 			newGram.setSeq(seq);
@@ -260,7 +292,7 @@ public class TTPService {
 
 				newGram.setFrag(false);
 			}
-			
+
 			Object d = newGram.getData();
 			newGram.setChecksum((short) makeChecksum(d));
 
@@ -280,28 +312,32 @@ public class TTPService {
 
 		int lastAck = 0;
 		while (true) {
-			/** receive the datagrams and check checksum first  **/
+			/** receive the datagrams and check checksum first **/
 			Datagram gram = datagramService.receiveDatagram();
-			
+
 			if (verbose > 0) {
-				System.out.println("received datagram, sequenceNum: " + String.valueOf(gram.getSeq()));
+				System.out.println("received datagram, sequenceNum: "
+						+ String.valueOf(gram.getSeq()));
 			}
-			
+
 			short checksum = gram.getChecksum();
-			
+
 			if (!validateChecksum(gram.getData(), checksum)) {
-				System.out.println("Checksum error, datagram sequenceNum: " + String.valueOf(gram.getSeq()));
+				System.out.println("Checksum error, datagram sequenceNum: "
+						+ String.valueOf(gram.getSeq()));
 				break;
 			}
-			
-			/** if this is the first gram, add it directly
-			 	if this is not the first one, the only condition it can be added to the list is
-			 	the equation of seq and the expected ack **/
+
+			/**
+			 * if this is the first gram, add it directly if this is not the
+			 * first one, the only condition it can be added to the list is the
+			 * equation of seq and the expected ack
+			 **/
 			if (receivedList.isEmpty() || gram.getSeq() == lastAck) {
 				receivedList.add(gram);
 				lastAck = gram.getSeq() + gram.getSize();
 			}
-			
+
 			/** build a return gram and fill the Ack field **/
 			Datagram returnGram = new Datagram();
 			returnGram.setSrcaddr(this.srcIP);
@@ -322,7 +358,7 @@ public class TTPService {
 
 		/** reassemble the grams in the list **/
 		Datagram datagram = reassemble(receivedList);
-		
+
 		return datagram.getData();
 	}
 
@@ -361,7 +397,7 @@ public class TTPService {
 		this.srcPort = srcPort;
 		this.desPort = desPort;
 	}
-	
+
 	public void accept() throws IOException, ClassNotFoundException {
 		Datagram datagram = datagramService.receiveDatagram();
 		this.srcIP = datagram.getDstaddr();
@@ -374,46 +410,47 @@ public class TTPService {
 		sendThread.stop();
 		receiveThread.stop();
 	}
-	
 
 	/**
 	 * makeChecksum, calculate the checksum of the data
 	 * 
-	 * @param Object data
+	 * @param Object
+	 *            data
 	 */
 	private short makeChecksum(Object d) {
 		short checksum = 0;
 		String data = d.toString();
 		byte[] dataBytes = data.getBytes();
-		
+
 		for (int i = 0; i < dataBytes.length; i++) {
 			checksum += (short) dataBytes[i];
 		}
-		while ( checksum / 0xff != 0) {
+		while (checksum / 0xff != 0) {
 			checksum = (short) (checksum & 0xff + checksum >> 8);
 		}
 		checksum = (short) ~checksum;
-		
+
 		return checksum;
 	}
-	
+
 	/**
 	 * validateChecksum, validate the checksum of the received data
 	 * 
-	 * @param Object d, short checksum
+	 * @param Object
+	 *            d, short checksum
 	 */
 	public boolean validateChecksum(Object d, short checksum) {
 		short newChecksum = 0;
 		String data = d.toString();
 		byte[] dataBytes = data.getBytes();
-		
+
 		for (int i = 0; i < dataBytes.length; i++) {
 			newChecksum += (short) dataBytes[i];
 		}
-		while ( newChecksum / 0xff != 0) {
+		while (newChecksum / 0xff != 0) {
 			newChecksum = (short) (newChecksum & 0xff + newChecksum >> 8);
 		}
-		
+
 		if ((newChecksum & 0xff) + (checksum & 0xff) == 0xff) {
 			return true;
 		} else {
